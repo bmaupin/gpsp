@@ -1559,11 +1559,13 @@ u32 cpu_modes[32] =
 
 u32 cpu_modes_cpsr[7] = { 0x10, 0x11, 0x12, 0x13, 0x17, 0x1B, 0x1F };
 
-// When switching modes set spsr[new_mode] to cpsr. Modifying PC as the
-// target of a data proc instruction will set cpsr to spsr[cpu_mode].
-
+#ifndef PSP
 u32 initial_reg[64];
 u32 *reg = initial_reg;
+#endif
+
+// When switching modes set spsr[new_mode] to cpsr. Modifying PC as the
+// target of a data proc instruction will set cpsr to spsr[cpu_mode].
 u32 spsr[6];
 
 // ARM/Thumb mode is stored in the flags directly, this is simpler than

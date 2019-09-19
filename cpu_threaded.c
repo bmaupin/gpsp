@@ -26,6 +26,9 @@
 #include <psp2/kernel/sysmem.h>
 #include <stdio.h>
 #endif
+#if defined(PSP)
+#include <pspkernel.h>
+#endif
 
 u8 *last_rom_translation_ptr = NULL;
 u8 *last_ram_translation_ptr = NULL;
@@ -227,7 +230,7 @@ extern u8 bit_count[256];
   u32 offset = opcode & 0x07FF                                                \
 
 
-#ifdef PSP_BUILD
+#ifdef PSP
 
 #include "psp/mips_emit.h"
 
@@ -257,8 +260,10 @@ static INLINE void RW_END(void)
 
 /* Cache invalidation */
 
-#if defined(PSP_BUILD)
+#if defined(PSP)
 #define translate_invalidate_dcache() sceKernelDcacheWritebackAll()
+#define invalidate_icache_region(addr, size) (void)0
+
 #elif defined(VITA)
 #define translate_invalidate_dcache_one(which)                                \
   if (which##_translation_ptr > last_##which##_translation_ptr)               \

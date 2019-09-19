@@ -198,6 +198,12 @@ void retro_init(void)
 
 #endif
 
+// #if defined(PSP) && defined(HAVE_DYNAREC)
+//    flush_translation_cache_rom();
+//    flush_translation_cache_ram();
+//    flush_translation_cache_bios();
+// #endif
+
    if (!gamepak_rom)
       init_gamepak_buffer();
    init_sound(1);
@@ -450,7 +456,7 @@ bool retro_load_game(const struct retro_game_info* info)
    rom_translation_ptr = rom_translation_cache;
    ram_translation_ptr = ram_translation_cache;
    bios_translation_ptr = bios_translation_cache;
-#elif defined(VITA)
+#elif defined(PSP) || defined(VITA)
    dynarec_enable = 1;
    rom_translation_ptr = rom_translation_cache;
    ram_translation_ptr = ram_translation_cache;

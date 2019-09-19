@@ -1,4 +1,4 @@
-DEBUG=0
+DEBUG=1
 HAVE_GRIFFIN=0
 FRONTEND_SUPPORTS_RGB565=1
 FORCE_32BIT_ARCH=0
@@ -216,11 +216,12 @@ else ifeq ($(platform), psp1)
 	AR = psp-ar$(EXE_EXT)
 	CFLAGS += -DPSP -G0
 	CFLAGS += -I$(shell psp-config --pspsdk-path)/include
-	CFLAGS += -march=allegrex -mfp32 -mgp32 -mlong32 -mabi=eabi
-	CFLAGS += -fomit-frame-pointer -ffast-math
-	CFLAGS += -falign-functions=32 -falign-loops -falign-labels -falign-jumps
+	# CFLAGS += -march=allegrex -mfp32 -mgp32 -mlong32 -mabi=eabi
+	# CFLAGS += -fomit-frame-pointer -ffast-math
+	# CFLAGS += -falign-functions=32 -falign-loops -falign-labels -falign-jumps
 	STATIC_LINKING = 1
-	HAVE_DYNAREC = 1
+	# HAVE_DYNAREC = 1
+	CPU_ARCH := mips
 
 # Vita
 else ifeq ($(platform), vita)

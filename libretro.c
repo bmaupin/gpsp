@@ -47,6 +47,22 @@ static int translation_caches_inited = 0;
 #define MAX_PATH (512)
 #endif
 
+u32 skip_next_frame = 0;
+
+#if defined(PSP)
+void vblank_interrupt_handler(u32 sub, u32 *parg);
+
+frameskip_type current_frameskip_type = auto_frameskip;
+u32 frameskip_value = 4;
+u32 random_skip = 0;
+
+u32 frameskip_counter = 0;
+
+u32 real_frame_count = 0;
+u32 virtual_frame_count = 0;
+u32 num_skipped_frames = 0;
+#endif
+
 static retro_log_printf_t log_cb;
 static retro_video_refresh_t video_cb;
 static retro_input_poll_t input_poll_cb;
@@ -216,6 +232,11 @@ void retro_deinit(void)
    perf_cb.perf_log();
    memory_term();
 
+#if defined(PSP)
+  sceKernelDisableSubIntr(PSP_VBLANK_INT, 0);
+  sceKernelReleaseSubIntrHandler(PSP_VBLANK_INT, 0);
+#endif
+
 #if defined(HAVE_MMAP) && defined(HAVE_DYNAREC)
    munmap(rom_translation_cache, ROM_TRANSLATION_CACHE_SIZE);
    munmap(ram_translation_cache, RAM_TRANSLATION_CACHE_SIZE);
@@ -271,6 +292,11 @@ void retro_set_environment(retro_environment_t cb)
    static struct retro_variable vars[] = {
 #ifdef HAVE_DYNAREC
       { "gpsp_drc", "Dynamic recompiler (restart); enabled|disabled" },
+#endif
+#if defined(PSP)
+      { "gpsp_frameskip_type", "Frameskip type; automatic|manual|off" },
+      { "gpsp_frameskip_value", "Frameskip value; 4|5|6|7|8|9|0|1|2|3" },
+      { "gpsp_frameskip_variation", "Frameskip variation; uniform|random" },
 #endif
       { NULL, NULL },
    };
@@ -401,6 +427,35 @@ static void check_variables(int started_from_load)
    else
       dynarec_enable = 1;
 #endif
+
+#if defined(PSP)
+   var.key = "gpsp_frameskip_value";
+   var.value = 0;
+   if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
+      frameskip_value = strtol(var.value, NULL, 10);
+
+   var.key = "gpsp_frameskip_type";
+   var.value = NULL;
+   if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
+   {
+      if (!strcmp(var.value, "off"))
+         current_frameskip_type = no_frameskip;
+      else if (!strcmp(var.value, "automatic"))
+         current_frameskip_type = auto_frameskip;
+      else if (!strcmp(var.value, "manual"))
+         current_frameskip_type = manual_frameskip;
+   }
+
+   var.key = "gpsp_frameskip_variation";
+   var.value = NULL;
+   if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
+   {
+      if (!strcmp(var.value, "uniform"))
+         random_skip = 0;
+      else if (!strcmp(var.value, "random"))
+         random_skip = 1;
+   }
+#endif
 }
 
 static void set_input_descriptors()
@@ -421,6 +476,13 @@ static void set_input_descriptors()
 
    environ_cb(RETRO_ENVIRONMENT_SET_INPUT_DESCRIPTORS, descriptors);
 }
+
+#if defined(PSP)
+void vblank_interrupt_handler(u32 sub, u32 *parg)
+{
+  real_frame_count++;
+}
+#endif
 
 bool retro_load_game(const struct retro_game_info* info)
 {
@@ -461,6 +523,11 @@ bool retro_load_game(const struct retro_game_info* info)
       dynarec_enable = 0;
 #else
    dynarec_enable = 0;
+#endif
+
+#if defined(PSP)
+   sceKernelRegisterSubIntrHandler(PSP_VBLANK_INT, 0, vblank_interrupt_handler, NULL);
+   sceKernelEnableSubIntr(PSP_VBLANK_INT, 0);
 #endif
 
    char filename_bios[MAX_PATH];
@@ -581,12 +648,54 @@ void retro_run(void)
 
    input_poll_cb();
 
+#if defined(PSP)
+   s32 used_frameskip = frameskip_value;
+
+   skip_next_frame = 0;
+
+   virtual_frame_count++;
+
+   if(real_frame_count >= virtual_frame_count)
+   {
+      if((real_frame_count > virtual_frame_count) &&
+      (current_frameskip_type == auto_frameskip) &&
+      (num_skipped_frames < frameskip_value))
+      {
+         skip_next_frame = 1;
+         num_skipped_frames++;
+      }
+      else
+      {
+         virtual_frame_count = real_frame_count;
+         num_skipped_frames = 0;
+      }
+   }
+
+   if(current_frameskip_type == manual_frameskip)
+   {
+      frameskip_counter = (frameskip_counter + 1) %
+      (used_frameskip + 1);
+      if(random_skip)
+      {
+         if(frameskip_counter != (rand() % (used_frameskip + 1)))
+         skip_next_frame = 1;
+      }
+      else
+      {
+         if(frameskip_counter)
+         skip_next_frame = 1;
+      }
+   }
+#endif
+
    switch_to_cpu_thread();
 
    render_audio();
 
-   video_cb(gba_screen_pixels, GBA_SCREEN_WIDTH, GBA_SCREEN_HEIGHT,
-            GBA_SCREEN_PITCH * 2);
+   /* Skip the video callback when skipping frames so the frontend can properly report FPS */
+   if (!skip_next_frame)
+      video_cb(gba_screen_pixels, GBA_SCREEN_WIDTH, GBA_SCREEN_HEIGHT,
+               GBA_SCREEN_PITCH * 2);
 
    if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE_UPDATE, &updated) && updated)
       check_variables(0);

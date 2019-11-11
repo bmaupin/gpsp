@@ -233,8 +233,8 @@ void retro_deinit(void)
    memory_term();
 
 #if defined(PSP)
-  sceKernelDisableSubIntr(PSP_VBLANK_INT, 0);
-  sceKernelReleaseSubIntrHandler(PSP_VBLANK_INT, 0);
+   sceKernelDisableSubIntr(PSP_VBLANK_INT, 0);
+   sceKernelReleaseSubIntrHandler(PSP_VBLANK_INT, 0);
 #endif
 
 #if defined(HAVE_MMAP) && defined(HAVE_DYNAREC)
@@ -439,11 +439,21 @@ static void check_variables(int started_from_load)
    if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
    {
       if (!strcmp(var.value, "off"))
+      {
          current_frameskip_type = no_frameskip;
+         sceKernelDisableSubIntr(PSP_VBLANK_INT, 0);
+      }
       else if (!strcmp(var.value, "automatic"))
+      {
          current_frameskip_type = auto_frameskip;
+         /* Only enable the interrupt handler when we're actually using it since it has a performance impact */
+         sceKernelEnableSubIntr(PSP_VBLANK_INT, 0);
+      }
       else if (!strcmp(var.value, "manual"))
+      {
          current_frameskip_type = manual_frameskip;
+         sceKernelDisableSubIntr(PSP_VBLANK_INT, 0);
+      }
    }
 
    var.key = "gpsp_frameskip_variation";
@@ -527,7 +537,6 @@ bool retro_load_game(const struct retro_game_info* info)
 
 #if defined(PSP)
    sceKernelRegisterSubIntrHandler(PSP_VBLANK_INT, 0, vblank_interrupt_handler, NULL);
-   sceKernelEnableSubIntr(PSP_VBLANK_INT, 0);
 #endif
 
    char filename_bios[MAX_PATH];

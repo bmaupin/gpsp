@@ -163,7 +163,9 @@ u32 update_gba(void)
 
           if(no_alpha)
             io_registers[REG_BLDCNT] = 0;
-          update_scanline();
+
+          if (!skip_next_frame)
+            update_scanline();
 
           // If in visible area also fire HDMA
           for(i = 0; i < 4; i++)

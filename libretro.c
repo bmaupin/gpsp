@@ -47,6 +47,14 @@ static int translation_caches_inited = 0;
 #define MAX_PATH (512)
 #endif
 
+// 59.72750057 hz
+#define GBA_FPS ((float) GBC_BASE_RATE) / (308 * 228 * 4)
+// TODO: can we push this limit to reduce choppiness?
+// #define MAX_FRAME_TIME 1.0f / ((float) GBA_FPS)
+// Good
+// #define MAX_FRAME_TIME 1.0f / 59.7f
+#define MAX_FRAME_TIME 1.0f / 59.0f
+
 frameskip_type current_frameskip_type = no_frameskip;
 u32 frameskip_value = 4;
 u32 random_skip = 0;
@@ -54,6 +62,12 @@ u32 random_skip = 0;
 u32 skip_next_frame = 0;
 
 u32 frameskip_counter = 0;
+
+// u32 real_frame_count = 0;
+// u32 virtual_frame_count = 0;
+u32 num_skipped_frames = 0;
+
+static float frame_time;
 
 static retro_log_printf_t log_cb;
 static retro_video_refresh_t video_cb;
@@ -141,8 +155,7 @@ void retro_get_system_av_info(struct retro_system_av_info* info)
    info->geometry.max_width = GBA_SCREEN_WIDTH;
    info->geometry.max_height = GBA_SCREEN_HEIGHT;
    info->geometry.aspect_ratio = 0;
-   // 59.72750057 hz
-   info->timing.fps = ((float) GBC_BASE_RATE) / (308 * 228 * 4);
+   info->timing.fps = ((float) GBA_FPS);
    info->timing.sample_rate = GBA_SOUND_FREQUENCY;
 }
 
@@ -224,6 +237,11 @@ void retro_deinit(void)
    perf_cb.perf_log();
    memory_term();
 
+// #if defined(PSP)
+//   sceKernelDisableSubIntr(PSP_VBLANK_INT, 0);
+//   sceKernelReleaseSubIntrHandler(PSP_VBLANK_INT, 0);
+// #endif
+
 #if defined(HAVE_MMAP) && defined(HAVE_DYNAREC)
    munmap(rom_translation_cache, ROM_TRANSLATION_CACHE_SIZE);
    munmap(ram_translation_cache, RAM_TRANSLATION_CACHE_SIZE);
@@ -280,8 +298,13 @@ void retro_set_environment(retro_environment_t cb)
 #ifdef HAVE_DYNAREC
       { "gpsp_drc", "Dynamic recompiler (restart); enabled|disabled" },
 #endif
+#if defined(PSP)
+      { "gpsp_frameskip_type", "Frameskip type; automatic|manual|off" },
+      { "gpsp_frameskip_value", "Frameskip value; 4|5|6|7|8|9|0|1|2|3" },
+#else
       { "gpsp_frameskip_type", "Frameskip type; off|manual" },
       { "gpsp_frameskip_value", "Frameskip value; 1|2|3|4|5|6|7|8|9|0" },
+#endif
       { "gpsp_frameskip_variation", "Frameskip variation; uniform|random" },
       { NULL, NULL },
    };
@@ -424,6 +447,8 @@ static void check_variables(int started_from_load)
    {
       if (!strcmp(var.value, "off"))
          current_frameskip_type = no_frameskip;
+      else if (!strcmp(var.value, "automatic"))
+         current_frameskip_type = auto_frameskip;
       else if (!strcmp(var.value, "manual"))
          current_frameskip_type = manual_frameskip;
    }
@@ -456,6 +481,18 @@ static void set_input_descriptors()
    };
 
    environ_cb(RETRO_ENVIRONMENT_SET_INPUT_DESCRIPTORS, descriptors);
+}
+
+// #if defined(PSP)
+// void vblank_interrupt_handler(u32 sub, u32 *parg)
+// {
+//   real_frame_count++;
+// }
+// #endif
+
+static void frame_time_cb(retro_usec_t usec)
+{
+   frame_time = usec / 1000000.0;
 }
 
 bool retro_load_game(const struct retro_game_info* info)
@@ -498,6 +535,14 @@ bool retro_load_game(const struct retro_game_info* info)
 #else
    dynarec_enable = 0;
 #endif
+
+// #if defined(PSP)
+//    sceKernelRegisterSubIntrHandler(PSP_VBLANK_INT, 0, vblank_interrupt_handler, NULL);
+//    sceKernelEnableSubIntr(PSP_VBLANK_INT, 0);
+// #endif
+
+   struct retro_frame_time_callback frame_cb = { frame_time_cb, 1000000 / ((float) GBA_FPS) };
+   environ_cb(RETRO_ENVIRONMENT_SET_FRAME_TIME_CALLBACK, &frame_cb);
 
    char filename_bios[MAX_PATH];
    const char* dir = NULL;
@@ -620,6 +665,57 @@ void retro_run(void)
    s32 used_frameskip = frameskip_value;
 
    skip_next_frame = 0;
+
+// #if defined(PSP)
+//    virtual_frame_count++;
+
+//    if(real_frame_count >= virtual_frame_count)
+//    {
+//       if((real_frame_count > virtual_frame_count) &&
+//       (current_frameskip_type == auto_frameskip) &&
+//       (num_skipped_frames < frameskip_value))
+//       {
+//          skip_next_frame = 1;
+//          num_skipped_frames++;
+//       }
+//       else
+//       {
+//          virtual_frame_count = real_frame_count;
+//          num_skipped_frames = 0;
+//       }
+//    }
+// #endif
+
+   // FPS should be 16 * 1024 * 1024
+   // Which means each frame should take 1/GBA_FPS (59.72750057) = 0.016742706
+   // Actual values during debugging: 0.0496620014, 0.336241007, 0.0493520014
+   if(current_frameskip_type == auto_frameskip)
+   {
+      if(frame_time > MAX_FRAME_TIME)
+      // if(frame_time > (1.0f / ((float) max_frame_time_divider)))
+      // if(frame_time > (1.0f / 59.0f))
+
+      {
+         if(num_skipped_frames < frameskip_value)
+         {
+            skip_next_frame = 1;
+            num_skipped_frames++;
+         }
+         else
+         {
+            num_skipped_frames = 0;
+         }
+      }
+   }
+
+   // if (log_cb) {
+   //    log_cb(RETRO_LOG_DEBUG, "[gpSP]: frame_time: %f\n", frame_time);
+   //    log_cb(RETRO_LOG_INFO, "[gpSP]: skip_next_frame: %i\n", skip_next_frame);
+   // }
+
+   // char buffer[50];
+   // info_msg(sprintf(buffer, "frame_time: %f", frame_time));
+   // info_msg(sprintf(buffer, "skip_next_frame: %i", skip_next_frame));
 
    if(current_frameskip_type == manual_frameskip)
    {
